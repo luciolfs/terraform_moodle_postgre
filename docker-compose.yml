@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine # Usando uma versão recente e leve do Postgres
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Persiste os dados do banco
+    environment:
+      POSTGRES_USER: moodleuser # Usuário do banco de dados
+      POSTGRES_PASSWORD: mysecretpassword # Senha do usuário
+      POSTGRES_DB: moodledb # Nome do banco de dados para o Moodle
+    networks:
+      - moodle-network
+
+  moodle:
+    image: bitnami/moodle:4.4 # Usando uma imagem confiável do Moodle
+    restart: unless-stopped
+    ports:
+      - "8080:8080" # Mapeia a porta 8080 do host para a 8080 do container
+    volumes:
+      - moodle_data:/bitnami/moodle # Persiste os dados do Moodle
+      - moodledata_data:/bitnami/moodledata # Persiste os arquivos dos cursos
+    environment:
+      # Configurações do Moodle para se conectar ao Postgres
+      MOODLE_DATABASE_TYPE: pgsql
+      MOODLE_DATABASE_HOST: postgres # Nome do serviço do banco de dados no Docker Compose
+      MOODLE_DATABASE_PORT: 5432
+      MOODLE_DATABASE_NAME: moodledb
+      MOODLE_DATABASE_USER: moodleuser
+      MOODLE_DATABASE_PASSWORD: mysecretpassword
+      MOODLE_SKIP_DATABASE_INTRO: yes # Pula a tela de configuração inicial do banco
+    networks:
+      - moodle-network
+    depends_on:
+      - postgres # Garante que o Postgres inicie primeiro
+
+# Definição de volumes para persistência de dados
+volumes:
+  postgres_data:
+  moodle_data:
+  moodledata_data:
+
+# Definição da rede
+networks:
+  moodle-network:
+    driver: bridge
