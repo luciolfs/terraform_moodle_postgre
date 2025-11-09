@@ -1,129 +1,66 @@
-#cria a imagem de PHP com apache
+# Use a imagem base oficial do PHP com Apache e PHP 8.1
 FROM php:8.1-apache
 
-#executa atualização do container e instalação de alguns softwares
-RUN apt-get update \
-&& apt upgrade -y \
-&& apt-get install -y wget unzip cron nano
+# Define os argumentos para a versão do Moodle e a URL de download
+ARG MOODLE_VERSION=4.1.9
+ARG MOODLE_DOWNLOAD_URL=https://download.moodle.org/download.php/direct/moodle-${MOODLE_VERSION}.zip
 
-#executa a instalação da extensão mysqli para docker
-RUN docker-php-ext-install -j$(nproc) mysqli
+# Atualiza os pacotes e instala as dependências do sistema e extensões PHP necessárias para Moodle e PostgreSQL
+RUN apt-get update && apt-get install -y \
+    git \
+    unzip \
+    wget \
+    libpq-dev \
+    libicu-dev \
+    libxml2-dev \
+    libzip-dev \
+    libonig-dev \
+    libfreetype6-dev \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
-#executa a instalação da biblioteca libzip-dev
-RUN set -eux; apt-get install -y libzip-dev
+# Instala as extensões PHP para Moodle e PostgreSQL
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-png && \
+    docker-php-ext-install -j$(nproc) gd \
+    intl \
+    mbstring \
+    pdo_pgsql \
+    pgsql \
+    soap \
+    xml \
+    zip \
+    curl
 
-#executa a instalação de bibliotecas necessárias para correta utilização do moodle
-RUN apt-get update \
-  && apt-get install -f -y --no-install-recommends \
-  rsync \
-#  netcat \
-  libicu-dev \
-  libz-dev \
-  libpq-dev \
-  libjpeg-dev \
-  libfreetype6-dev \
-  libmcrypt-dev \
-  libbz2-dev \
-  libjpeg62-turbo-dev \
-  gnupg \
-  libpng-dev \
-  libxslt-dev \
-  gettext \
-  unixodbc-dev \
-  uuid-dev \
-  ghostscript \
-  libaio1t64 \
-  libgss3 \
-  locales \
-  sassc \
-  libmagickwand-dev \
-  libldap2-dev \
-  git
+# Configura o Apache: ativa os módulos rewrite e ssl
+RUN a2enmod rewrite \
+    && a2enmod ssl \
+    && a2ensite default-ssl
 
-#executa a instalação de extensões do php necessárias para o Moodle
-RUN docker-php-ext-configure soap --enable-soap 
-RUN docker-php-ext-configure bcmath --enable-bcmath 
-RUN docker-php-ext-configure pcntl --enable-pcntl 
-RUN docker-php-ext-configure zip 
-RUN docker-php-ext-configure ldap --with-libdir=lib/x86_64-linux-gnu
-RUN docker-php-ext-install -j$(nproc) zip opcache pgsql intl bcmath pcntl sockets exif soap
-#ldap xmlrpc
+# Baixa e extrai o Moodle
+RUN wget -q ${MOODLE_DOWNLOAD_URL} -O /tmp/moodle.zip && \
+    unzip -q /tmp/moodle.zip -d /var/www/html && \
+    rm /tmp/moodle.zip
 
-RUN docker-php-ext-configure gd \
-    --with-freetype=/usr/include/ \
-    --with-jpeg=/usr/include/ \
-    --enable-gd
+# Define permissões para o diretório do Moodle e cria o diretório moodledata
+RUN chown -R www-data:www-data /var/www/html && \
+    chmod -R 755 /var/www/html && \
+    mkdir -p /var/www/moodledata && \
+    chown -R www-data:www-data /var/www/moodledata && \
+    chmod -R 777 /var/www/moodledata
 
-RUN docker-php-ext-install -j$(nproc) gd
+# Configuração básica do Apache para Moodle (opcional, Moodle geralmente configura via web installer)
+# Este VHost padrão garante que o Moodle seja servido.
+COPY 000-default.conf /etc/apache2/sites-available/000-default.conf
+COPY default-ssl.conf /etc/apache2/sites-available/default-ssl.conf
+COPY php.ini /usr/local/etc/php/conf.d/moodle.ini
 
-RUN pecl install igbinary uuid xmlrpc-beta imagick \
-&& docker-php-ext-enable igbinary uuid xmlrpc imagick
+# Expõe as portas 80 (HTTP) e 443 (HTTPS)
+EXPOSE 80 443
 
-RUN apt-get autopurge -y \
-    && apt-get autoremove -y \
-    && apt-get autoclean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/doc/* \
-    && docker-php-source delete
-
-# Configura o arquivo php.ini para melhorar o desempenho do Moodle
-RUN set -ex \
-    && { \
-        echo 'log_errors = on'; \
-        echo 'display_errors = off'; \
-        echo 'always_populate_raw_post_data = -1'; \
-        echo 'cgi.fix_pathinfo = 1'; \
-        echo 'session.auto_start = 0'; \
-        echo 'upload_max_filesize = 500M'; \
-        echo 'post_max_size = 150M'; \
-        echo 'max_execution_time = 1800'; \
-        echo 'max_input_vars = 5000'; \
-	echo 'memory_limit = -1'; \
-        echo '[opcache]'; \
-        echo 'opcache.enable = 1'; \
-        echo 'opcache.memory_consumption = 128'; \
-        echo 'opcache.max_accelerated_files = 8000'; \
-        echo 'opcache.revalidate_freq = 60'; \
-        echo 'opcache.use_cwd = 1'; \
-        echo 'opcache.validate_timestamps = 1'; \
-        echo 'opcache.save_comments = 1'; \
-        echo 'opcache.enable_file_override = 0'; \
-    } | tee /usr/local/etc/php/conf.d/php.ini
-
-WORKDIR /var/www/html
-
-
-#faz dowload do moodle 3.11, descompacta e configura as permissões
-RUN cd /var/www/html
-
-RUN git clone https://github.com/moodle/moodle moodle 
-
-RUN cd /var/www/html/moodle && git checkout origin/MOODLE_405_STABLE -b MOODLE_405_STABLE 
-
-#RUN cd /var/www/html/moodle && git checkout origin/MOODLE_404_STABLE -b MOODLE_404_STABLE 
-
-#RUN cd /var/www/html/moodle && git checkout origin/MOODLE_403_STABLE -b MOODLE_403_STABLE 
-
-#RUN cd /var/www/html/moodle && git checkout origin/MOODLE_402_STABLE -b MOODLE_402_STABLE 
-
-#RUN cd /var/www/html/moodle && git checkout origin/MOODLE_401_STABLE -b MOODLE_401_STABLE 
-
-#RUN cd /var/www/html/moodle && git checkout origin/MOODLE_311_STABLE -b MOODLE_311_STABLE 
-
-RUN cd /var/www/html && chmod 0755 /var/www/html -R
-
-#Realiza alteração do proprietário do diretório
-RUN chown www-data:www-data /var/www/html -R
-
-#Cria o diretório de arquivos do moodle, concede permissão e altera dono e grupo do diretório
-RUN mkdir /var/www/moodledata \
-&& cd /var/www/moodledata \
-&& chmod 0770 /var/www/moodledata -R 
-RUN cd /var/www/moodledata \
-&& chown www-data:www-data /var/www/moodledata -R
-
-#habilita o CRON
-RUN echo "*/1 * * * * root php /var/www/html/moodle/admin/cli/cron.php > /var/log/moodle_cron.log" >> /etc/crontab
-
+# Comando padrão para iniciar o Apache
+CMD ["apache2-foreground"]
 RUN touch /var/log/moodle_cron.log
 
 RUN sed -i 's/^exec /service cron start\n\nexec /' /usr/local/bin/apache2-foreground
