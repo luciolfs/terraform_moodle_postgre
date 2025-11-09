@@ -1,45 +1,47 @@
 version: '3.8'
 
-services:
-  postgres:
-    image: postgres:16-alpine # Usando uma versão recente e leve do Postgres
-    restart: unless-stopped
-    volumes:
-      - postgres_data:/var/lib/postgresql/data # Persiste os dados do banco
-    environment:
-      POSTGRES_USER: moodleuser # Usuário do banco de dados
-      POSTGRES_PASSWORD: mysecretpassword # Senha do usuário
-      POSTGRES_DB: moodledb # Nome do banco de dados para o Moodle
-    networks:
-      - moodle-network
-
-  moodle:
-    image: bitnami/moodle:4.4 # Usando uma imagem confiável do Moodle
-    restart: unless-stopped
-    ports:
-      - "8080:8080" # Mapeia a porta 8080 do host para a 8080 do container
-    volumes:
-      - moodle_data:/bitnami/moodle # Persiste os dados do Moodle
-      - moodledata_data:/bitnami/moodledata # Persiste os arquivos dos cursos
-    environment:
-      # Configurações do Moodle para se conectar ao Postgres
-      MOODLE_DATABASE_TYPE: pgsql
-      MOODLE_DATABASE_HOST: postgres # Nome do serviço do banco de dados no Docker Compose
-      MOODLE_DATABASE_PORT: 5432
-      MOODLE_DATABASE_NAME: moodledb
-      MOODLE_DATABASE_USER: moodleuser
-      MOODLE_DATABASE_PASSWORD: mysecretpassword
-      MOODLE_SKIP_DATABASE_INTRO: yes # Pula a tela de configuração inicial do banco
-    networks:
-      - moodle-network
-    depends_on:
-      - postgres # Garante que o Postgres inicie primeiro
-
-# Definição de volumes para persistência de dados
 volumes:
-  postgres_data:
-  moodle_data:
-  moodledata_data:
+  moodledata:
+  postgresql_data:
+
+services:
+  amb01:
+    container_name: moodleserver
+    build: .
+    ports:
+      - "9090:80"
+      - "9443:443"
+    volumes:
+      - ./moodledata/_data/:/var/www/moodledata # Persistência para dados do Moodle
+    depends_on:
+      - database # Garante que o banco de dados inicie antes do Moodle
+    links:
+      - database # Permite que o Moodle se comunique com o serviço 'database'
+
+  database:
+    image: postgres:latest # Imagem oficial do PostgreSQL
+    container_name: moodledb
+    volumes:
+      - ./postgresql/_data/:/var/lib/postgresql/data # Persistência para os dados do PostgreSQL
+    environment:
+      POSTGRES_DB: moodle           # Nome do banco de dados Moodle
+      POSTGRES_USER: moodle_user    # Usuário do banco de dados Moodle
+      POSTGRES_PASSWORD: mymoodlepass # Senha do usuário do banco de dados
+
+  pgadmin:
+    image: dpage/pgadmin4:latest # Imagem oficial do pgAdmin 4
+    container_name: pgadmin
+    ports:
+      - "88:80" # Porta para acessar o pgAdmin (host:container)
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com # Email para login no pgAdmin
+      PGADMIN_DEFAULT_PASSWORD: admin          # Senha para login no pgAdmin
+    depends_on:
+      - database # Garante que o banco de dados inicie antes do pgAdmin
+    links:
+      - database # Permite que o pgAdmin se comunique com o serviço 'database'
+    volumes:
+      - moodledata:/var/lib/pgadmin # Volume para persistir configurações do pgAdmin, usando volume nomeado
 
 # Definição da rede
 networks:
